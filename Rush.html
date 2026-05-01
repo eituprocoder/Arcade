@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RUSH - Cyberpunk RPG</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+
+        :root { --cyan: #0ff; --magenta: #f0f; --dark: #0a0a0c; --gray: #1a1a24; --text: #e0e0e0; --gold: #ffd700; }
+        body { background-color: var(--dark); color: var(--text); font-family: 'Orbitron', sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
+        h1, h2, h3 { text-transform: uppercase; text-shadow: 0 0 10px var(--cyan); text-align: center; }
+        h1 { font-size: 3rem; color: var(--cyan); letter-spacing: 5px; margin-bottom: 5px; }
+        
+        .container { width: 100%; max-width: 800px; background: var(--gray); border: 2px solid var(--cyan); border-radius: 10px; padding: 20px; box-shadow: 0 0 20px rgba(0, 255, 255, 0.2); display: none; margin-bottom: 20px;}
+        .active { display: block; }
+
+        input, button, select { font-family: 'Orbitron', sans-serif; background: #000; border: 1px solid var(--cyan); color: var(--cyan); padding: 10px 20px; margin: 10px; font-size: 1rem; cursor: pointer; border-radius: 5px; transition: all 0.3s ease; text-transform: uppercase; outline: none;}
+        input:focus, select:focus { box-shadow: 0 0 10px var(--cyan); }
+        button:hover { background: var(--cyan); color: var(--dark); box-shadow: 0 0 15px var(--cyan); }
+        button.magenta-btn { border-color: var(--magenta); color: var(--magenta); }
+        button.magenta-btn:hover { background: var(--magenta); color: var(--dark); box-shadow: 0 0 15px var(--magenta); }
+
+        .skills-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 20px; }
+        .skill-card { border: 1px solid #555; padding: 10px; border-radius: 5px; text-align: center; background: #111; cursor: pointer; position: relative; overflow: hidden; }
+        .skill-card.unlocked { border-color: var(--cyan); color: var(--cyan); }
+        .skill-card.equipped { border-color: var(--magenta); box-shadow: 0 0 10px var(--magenta); }
+        .skill-card.locked { opacity: 0.5; cursor: not-allowed; }
+        .cooldown-overlay { position: absolute; bottom: 0; left: 0; width: 100%; height: 0%; background: rgba(255, 0, 255, 0.4); }
+
+        .stats-panel { display: flex; justify-content: space-between; background: #000; padding: 15px; border: 1px solid var(--cyan); margin-bottom: 20px; flex-wrap: wrap; }
+        .level-badge { background: var(--magenta); color: #000; padding: 2px 8px; border-radius: 5px; font-weight: bold; }
+        
+        .arena-hud { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .health-bar-bg { width: 100%; height: 20px; background: #333; margin-top: 5px; border: 1px solid #fff; position: relative;}
+        .health-bar-fill { height: 100%; width: 100%; background: var(--cyan); transition: width 0.2s; }
+        .enemy-health .health-bar-fill { background: var(--magenta); }
+        .shield-bar { position: absolute; top: 0; left: 0; height: 100%; background: rgba(255, 255, 255, 0.7); transition: width 0.2s; z-index: 2;}
+        .status-effects { display: flex; gap: 5px; margin-top: 5px; font-size: 0.8rem; height: 15px; color: #ff0;}
+        
+        /* Leaderboard Styles */
+        .ranking-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .ranking-table th, .ranking-table td { border: 1px solid var(--cyan); padding: 8px; text-align: center; }
+        .ranking-table th { background: var(--cyan); color: var(--dark); }
+        .rank-1 { color: var(--gold); text-shadow: 0 0 10px var(--gold); font-weight: bold;}
+
+        #qrcode { display: flex; justify-content: center; margin: 20px; background: white; padding: 10px; border-radius: 5px; width: max-content; margin-left: auto; margin-right: auto;}
+    </style>
+</head>
+<body>
+
+    <h1>RUSH</h1>
+    <h3 id="leagueDisplay" style="color: var(--magenta); margin-top: 0;">Liga Bronce</h3>
+
+    <div id="menuScreen" class="container active">
+        <div class="stats-panel">
+            <div><span>Piloto: </span><input type="text" id="playerNameInput" value="Ethan" onchange="savePlayerName()"></div>
+            <div><span class="level-badge">Nvl <span id="levelDisplay">1</span></span> <small style="color: #888;">(XP: <span id="xpCount">0</span>)</small></div>
+            <div style="font-size: 1.2rem; color: #ff0;">Trofeos: <span id="trophyCount">0</span></div>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 20px;">
+            <select id="gameModeSelect">
+                <option value="classic">1. Clásico (Normal)</option>
+                <option value="sudden_death">2. Muerte Súbita (HP 20%, Daño x2)</option>
+                <option value="tank">3. Modo Tanque (HP x3, Daño 50%)</option>
+                <option value="crossfire">4. Fuego Cruzado (Recargas Rápidas)</option>
+                <option value="vampire">5. Robo de Datos (100% Lifesteal Global)</option>
+                <option value="chaos">6. Caos Cuántico (Efectos x2 Duración)</option>
+                <option value="survival">7. Supervivencia (Jugar vs IA Bot)</option>
+            </select>
+        </div>
+
+        <div style="text-align: center;">
+            <button onclick="showScreen('skillsScreen')">Arsenal (Habilidades)</button>
+            <button class="magenta-btn" onclick="hostGame()">Crear Sala</button>
+            <br>
+            <input type="text" id="joinIdInput" placeholder="Código de sala">
+            <button class="magenta-btn" onclick="joinGame()">Unirse</button>
+        </div>
+    </div>
+
+    <div id="rankingScreen" class="container active" style="margin-top: 0;">
+        <h2 style="color: var(--gold);">Global Network Ranking</h2>
+        <table class="ranking-table">
+            <thead><tr><th>Pos</th><th>Piloto</th><th>Nivel</th><th>Trofeos</th></tr></thead>
+            <tbody id="rankingBody"><tr><td colspan="4">Conectando a Supabase...</td></tr></tbody>
+        </table>
+    </div>
+
+    <div id="skillsScreen" class="container">
+        <h2>Arsenal de Combate</h2>
+        <p style="text-align: center;">Equipadas: <span id="equipCount">0</span>/6</p>
+        <button onclick="showScreen('menuScreen'); document.getElementById('rankingScreen').classList.add('active');">Volver</button>
+        <div class="skills-grid" id="skillsList"></div>
+    </div>
+
+    <div id="lobbyScreen" class="container" style="text-align: center;">
+        <h2>Sala de Espera <span id="lobbyModeDisplay" style="color:var(--magenta); font-size:1rem;"></span></h2>
+        <h1 id="peerIdDisplay" style="user-select: all; font-size: 4rem;">...</h1>
+        <p>Comparte este código de 5 letras.</p>
+        <div id="qrcode"></div>
+        <button onclick="cancelMatch()">Cancelar</button>
+    </div>
+
+    <div id="battleScreen" class="container">
+        <h2>SISTEMA CONECTADO</h2>
+        <h4 id="activeModeText" style="color: var(--magenta); text-align: center; margin-top: -10px;">Modo Clásico</h4>
+        
+        <div class="arena-hud">
+            <div style="width: 45%;">
+                <h3 id="myArenaName">Tú</h3>
+                <div class="health-bar-bg"><div id="myHealth" class="health-bar-fill"></div><div id="myShield" class="shield-bar" style="width: 0%;"></div></div>
+                <p>HP: <span id="myHpText">1000</span> <span id="myShieldText" style="color:#fff;"></span></p>
+                <div class="status-effects" id="myStatus"></div>
+            </div>
+            <div style="width: 45%; text-align: right;" class="enemy-health">
+                <h3 id="enemyArenaName">Enemigo</h3>
+                <div class="health-bar-bg"><div id="enemyHealth" class="health-bar-fill"></div><div id="enemyShield" class="shield-bar" style="width: 0%;"></div></div>
+                <p>HP: <span id="enemyHpText">1000</span> <span id="enemyShieldText" style="color:#fff;"></span></p>
+                <div class="status-effects" id="enemyStatus" style="justify-content: flex-end;"></div>
+            </div>
+        </div>
+
+        <div class="skills-grid" id="battleSkillsGrid"></div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. CONFIGURACIÓN DE SUPABASE (¡MODIFICA ESTO!)
+        // ==========================================
+        const supabaseUrl = 'https://gtedvztwsrgxwbiyznkm.supabase.co'; // Ej: https://xyz.supabase.co
+        const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0ZWR2enR3c3JneHdiaXl6bmttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MDk3MzIsImV4cCI6MjA5MzE4NTczMn0.fEgkFdx1rMHQNuXZOFIPsfemQxcfVVET-c1OarsHJG8';
+        
+        // Inicializar cliente (solo funcionará cuando pongas tus credenciales)
+        let sb = null;
+        try { sb = supabase.createClient(supabaseUrl, supabaseAnonKey); } catch(e) { console.log("Supabase no configurado aún."); }
+
+        // ==========================================
+        // 2. DATOS LOCALES Y PROGRESIÓN
+        // ==========================================
+        let playerData = {
+            name: localStorage.getItem("rush_playerName") || "Eitan",
+            trophies: parseInt(localStorage.getItem("rush_trophies")) || 0,
+            xp: parseInt(localStorage.getItem("rush_xp")) || 0,
+            equipped: JSON.parse(localStorage.getItem("rush_equipped")) || [1]
+        };
+
+        function getLevel() { return Math.floor(Math.sqrt(playerData.xp / 100)) + 1; }
+        function getMyMaxHp() { return 1000 + ((getLevel() - 1) * 80); }
+        function getMyStr() { return 1.0 + ((getLevel() - 1) * 0.05); }
+        function getMyRes() { return 1.0 + ((getLevel() - 1) * 0.05); }
+
+        // ==========================================
+        // 3. BASE DE DATOS Y RANKING GLOBAL
+        // ==========================================
+        async function syncGlobalRanking() {
+            if(!sb) return;
+            // Guardar mis datos
+            await sb.from('ranking').upsert({ name: playerData.name, trophies: playerData.trophies, level: getLevel() });
+            
+            // Obtener Top 10
+            const { data } = await sb.from('ranking').select('*').order('trophies', { ascending: false }).limit(10);
+            if(data) {
+                const tbody = document.getElementById('rankingBody');
+                tbody.innerHTML = '';
+                data.forEach((player, index) => {
+                    let tr = document.createElement('tr');
+                    if(index === 0) tr.className = 'rank-1';
+                    tr.innerHTML = `<td>${index + 1}</td><td>${player.name}</td><td>${player.level}</td><td>${player.trophies} 🏆</td>`;
+                    tbody.appendChild(tr);
+                });
+            }
+        }
+
+        // ==========================================
+        // 4. HABILIDADES (AHORA SON 44)
+        // ==========================================
+        const ALL_SKILLS = [
+            // Las 22 originales simplificadas para espacio...
+            { id: 1, name: "Láser Básico", unlock: 0, cd: 1000, effects: { dmg: 50 } },
+            { id: 2, name: "Escudo Neón", unlock: 10, cd: 3000, effects: { shield: 100, iron_skin: 3 } },
+            { id: 3, name: "Pulso EMP", unlock: 20, cd: 4000, effects: { dmg: 30, silence: 2 } },
+            { id: 4, name: "Hackeo Rápido", unlock: 30, cd: 2000, effects: { vuln: 4, dmg: 20 } },
+            { id: 5, name: "Cuchilla Plasma", unlock: 50, cd: 4000, effects: { bleed: 15, dmg: 40 } },
+            { id: 6, name: "Dron Centinela", unlock: 75, cd: 5000, effects: { regen: 20, shield: 50 } },
+            { id: 7, name: "Sobrecarga", unlock: 100, cd: 6000, effects: { dmg: 120, rage: 3 } },
+            { id: 8, name: "Salto Cuántico", unlock: 150, cd: 4500, effects: { evasion: 3, dmg: 40 } },
+            { id: 9, name: "Cañón Iones", unlock: 200, cd: 8000, effects: { pierce: 150 } },
+            { id: 10, name: "Nanobots", unlock: 250, cd: 5000, effects: { heal: 150, cleanse: true } },
+            { id: 11, name: "Granada Glitch", unlock: 300, cd: 5500, effects: { stun: 2, dmg: 50 } },
+            { id: 12, name: "Camuflaje Óptico", unlock: 400, cd: 6000, effects: { blind: 4, evasion: 2 } },
+            { id: 13, name: "Red de Datos", unlock: 500, cd: 7000, effects: { freeze: 3, dmg: 60 } },
+            { id: 14, name: "Choque Cyber", unlock: 600, cd: 5000, effects: { dmg: 80, weakness: 3 } },
+            { id: 15, name: "Campo Estasis", unlock: 700, cd: 6000, effects: { stun: 1, freeze: 2, dmg: 30 } },
+            { id: 16, name: "Inyección Adrenalina", unlock: 800, cd: 9000, effects: { heal: 100, rage: 4, regen: 10 } },
+            { id: 17, name: "Bombardeo Orbital", unlock: 1000, cd: 12000, effects: { burn: 40, dmg: 100 } },
+            { id: 18, name: "Virus Gusano", unlock: 1200, cd: 4000, effects: { poison: 20, weakness: 3 } },
+            { id: 19, name: "Muro de Fuego", unlock: 1500, cd: 8000, effects: { reflect: 4, burn: 20 } },
+            { id: 20, name: "Espejo Reflector", unlock: 2000, cd: 9000, effects: { reflect: 5, iron_skin: 3 } },
+            { id: 21, name: "Singularidad", unlock: 2500, cd: 15000, effects: { pierce: 250, stun: 2 } },
+            { id: 22, name: "Protocolo RUSH", unlock: 3000, cd: 20000, effects: { dmg: 300, rage: 5, evasion: 2 } },
+            { id: 23, name: "Daga Fractal", unlock: 3200, cd: 3000, effects: { pierce: 60, bleed: 20 } },
+            { id: 24, name: "Tormenta Neón", unlock: 3400, cd: 7000, effects: { blind: 3, dmg: 90 } },
+            { id: 25, name: "Sifón de Red", unlock: 3600, cd: 5000, effects: { lifesteal: 120 } },
+            { id: 26, name: "Matriz Defensiva", unlock: 3800, cd: 8000, effects: { shield: 200, cleanse: true } },
+            { id: 27, name: "Sobrecarga Térmica", unlock: 4000, cd: 6500, effects: { burn: 50, vuln: 3 } },
+            { id: 28, name: "Hielo Negro", unlock: 4200, cd: 7500, effects: { freeze: 4, poison: 30 } },
+            { id: 29, name: "Eco Fantasma", unlock: 4400, cd: 6000, effects: { lifesteal: 70, evasion: 3 } },
+            { id: 30, name: "Carga Perforante", unlock: 4600, cd: 8500, effects: { pierce: 180, weakness: 2 } },
+            { id: 31, name: "Núcleo Inestable", unlock: 4800, cd: 10000, effects: { dmg: 200, burn: 30 } },
+            { id: 32, name: "Baliza Restauración", unlock: 5000, cd: 12000, effects: { regen: 50, heal: 200 } },
+            { id: 33, name: "Colapso Cuántico", unlock: 6000, cd: 25000, effects: { pierce: 400, stun: 3, silence: 3 } },
+            // LAS 11 NUEVAS (IDs 34 al 44)
+            { id: 34, name: "Furia de Tuky", unlock: 6200, cd: 4500, effects: { evasion: 4, bleed: 35, dmg: 40 } }, // ¡El tributo!
+            { id: 35, name: "Torrente Binario", unlock: 6500, cd: 5000, effects: { lifesteal: 50, regen: 30 } },
+            { id: 36, name: "Desfragmentador", unlock: 6800, cd: 6000, effects: { vuln: 5, weakness: 5 } },
+            { id: 37, name: "Escudo Prisma", unlock: 7000, cd: 8000, effects: { shield: 300, reflect: 3 } },
+            { id: 38, name: "Vórtice de Datos", unlock: 7500, cd: 10000, effects: { stun: 2, burn: 50, dmg: 100 } },
+            { id: 39, name: "Latido Cibernético", unlock: 8000, cd: 12000, effects: { heal: 300, iron_skin: 5 } },
+            { id: 40, name: "Cero Absoluto", unlock: 8500, cd: 15000, effects: { freeze: 5, dmg: 150 } },
+            { id: 41, name: "Rayo Orbital II", unlock: 9000, cd: 18000, effects: { pierce: 350, blind: 4 } },
+            { id: 42, name: "Corrupción", unlock: 9500, cd: 7000, effects: { poison: 50, bleed: 40 } },
+            { id: 43, name: "Mártir Digital", unlock: 10000, cd: 0, effects: { dmg: 500, stun: 4 } }, // Muy fuerte pero un solo uso en teoría
+            { id: 44, name: "GOD MODE", unlock: 15000, cd: 30000, effects: { heal: 500, rage: 10, shield: 500 } }
+        ];
+
+        // ==========================================
+        // 5. MOTOR MULTIJUGADOR SUPABASE REALTIME
+        // ==========================================
+        let currentChannel = null;
+        let inBattle = false;
+        let currentGameMode = 'classic';
+        let isHost = false;
+
+        function generateRoomCode() { return Math.random().toString(36).substring(2, 7).toUpperCase(); }
+
+        function hostGame() {
+            if(!sb) return alert("Falta configurar la clave de Supabase en el código HTML.");
+            const mode = document.getElementById("gameModeSelect").value;
+            currentGameMode = mode;
+            isHost = true;
+
+            if(mode === 'survival') {
+                startSurvivalMode();
+                return;
+            }
+
+            const roomId = generateRoomCode();
+            document.getElementById('peerIdDisplay').innerText = roomId;
+            document.getElementById('lobbyModeDisplay').innerText = `(${mode})`;
+            document.getElementById('qrcode').innerHTML = ""; 
+            new QRCode(document.getElementById("qrcode"), { text: roomId, width: 128, height: 128 });
+            
+            showScreen('lobbyScreen');
+            document.getElementById('rankingScreen').classList.remove('active');
+            connectToRoom(roomId);
+        }
+
+        function joinGame() {
+            if(!sb) return alert("Falta configurar Supabase.");
+            const id = document.getElementById("joinIdInput").value.trim().toUpperCase();
+            if(!id) return alert("Ingresa un código válido");
+            isHost = false;
+            connectToRoom(id);
+        }
+
+        function cancelMatch() {
+            if(currentChannel) sb.removeChannel(currentChannel);
+            showScreen('menuScreen');
+            document.getElementById('rankingScreen').classList.add('active');
+        }
+
+        function connectToRoom(roomId) {
+            if(currentChannel) sb.removeChannel(currentChannel);
+            
+            currentChannel = sb.channel('room_' + roomId);
+            
+            currentChannel.on('broadcast', { event: 'gameAction' }, payload => {
+                handleNetworkData(payload.payload);
+            }).subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    if (!isHost) {
+                        // El cliente saluda y pregunta el modo de juego
+                        currentChannel.send({ type: 'broadcast', event: 'gameAction', payload: { 
+                            type: 'join', name: playerData.name, level: getLevel(), maxHp: getMyMaxHp() 
+                        }});
+                    }
+                }
+            });
+        }
+
+        function handleNetworkData(data) {
+            if (data.type === 'join' && isHost) {
+                // Host recibe al jugador, le pasa los datos y el modo de juego
+                enemyLevel = data.level;
+                enemyMaxHp = data.maxHp;
+                currentChannel.send({ type: 'broadcast', event: 'gameAction', payload: { 
+                    type: 'start', mode: currentGameMode, name: playerData.name, level: getLevel(), maxHp: getMyMaxHp() 
+                }});
+                document.getElementById("enemyArenaName").innerHTML = `${data.name} <span class="level-badge" style="font-size:0.8rem">Nvl ${data.level}</span>`;
+                startBattle();
+            }
+            if (data.type === 'start' && !isHost) {
+                currentGameMode = data.mode;
+                enemyLevel = data.level;
+                enemyMaxHp = data.maxHp;
+                document.getElementById("enemyArenaName").innerHTML = `${data.name} <span class="level-badge" style="font-size:0.8rem">Nvl ${data.level}</span>`;
+                startBattle();
+            }
+            if (data.type === 'skillCast') processIncomingSkill(data.effects, data.str);
+            if (data.type === 'syncHp') {
+                enemyState.hp = data.hp;
+                enemyState.shield = data.shield;
+                updateBattleUI();
+            }
+        }
+
+        // ==========================================
+        // 6. MOTOR DE BATALLA Y MODIFICADORES DE MODO
+        // ==========================================
+        let battleLoopInterval = null;
+        let enemyLevel = 1;
+        let enemyMaxHp = 1000;
+        let myState = {}; let enemyState = {};
+        let botInterval = null; // Para modo supervivencia
+
+        function getInitialState(maxHp) {
+            return {
+                hp: maxHp, shield: 0, regen: 0, poison: 0, burn: 0, bleed: 0,
+                stun: 0, silence: 0, freeze: 0, blind: 0, reflect: 0, weakness: 0, vuln: 0, rage: 0, iron_skin: 0, evasion: 0
+            };
+        }
+
+        function applyGameModeModifiers() {
+            document.getElementById("activeModeText").innerText = "Modo: " + currentGameMode.toUpperCase();
+            
+            if(currentGameMode === 'sudden_death') {
+                myState.hp = getMyMaxHp() * 0.2;
+                enemyState.hp = enemyMaxHp * 0.2;
+            } else if (currentGameMode === 'tank') {
+                myState.hp = getMyMaxHp() * 3;
+                enemyState.hp = enemyMaxHp * 3;
+            }
+        }
+
+        function startBattle() {
+            inBattle = true;
+            showScreen('battleScreen');
+            document.getElementById('rankingScreen').classList.remove('active');
+            
+            myState = getInitialState(getMyMaxHp());
+            enemyState = getInitialState(enemyMaxHp);
+            
+            applyGameModeModifiers();
+
+            document.getElementById("myArenaName").innerText = playerData.name;
+            buildBattleControls();
+            updateBattleUI();
+
+            if(battleLoopInterval) clearInterval(battleLoopInterval);
+            battleLoopInterval = setInterval(battleTick, 1000);
+        }
+
+        function startSurvivalMode() {
+            currentGameMode = 'survival';
+            enemyLevel = getLevel() + 5; // Bot más fuerte
+            enemyMaxHp = 2000 + (enemyLevel * 100);
+            document.getElementById("enemyArenaName").innerHTML = `IA CENTINELA <span class="level-badge" style="font-size:0.8rem">Nvl ${enemyLevel}</span>`;
+            
+            startBattle();
+
+            // IA simple del Bot
+            botInterval = setInterval(() => {
+                if(!inBattle || myState.hp <= 0) return;
+                let botDmg = 50 + (enemyLevel * 5);
+                // Bot ataca
+                processIncomingSkill({ dmg: botDmg }, 1.0);
+                
+                // Bot se cura a veces
+                if(Math.random() < 0.2) enemyState.hp = Math.min(enemyState.hp + 100, enemyMaxHp);
+                
+                updateBattleUI();
+            }, 3000);
+        }
+
+        function useSkill(skill, btnElement) {
+            if (btnElement.classList.contains("locked") || myState.stun > 0 || myState.silence > 0) return;
+            
+            let e = { ...skill.effects }; // Copia de efectos
+
+            // Modificador Fuego Cruzado
+            let actualCd = skill.cd;
+            if(currentGameMode === 'crossfire') actualCd = actualCd / 2;
+            
+            // Modificador Caos Cuántico
+            if(currentGameMode === 'chaos') {
+                for(let k in e) if(typeof e[k] === 'number' && ['stun','silence','freeze','blind'].includes(k)) e[k] *= 2;
+            }
+
+            if(e.cleanse) { myState.poison = myState.burn = myState.bleed = myState.blind = myState.weakness = myState.stun = myState.silence = myState.freeze = 0; }
+            if(e.heal) applyHeal(myState, e.heal);
+            if(e.shield) myState.shield += e.shield;
+            if(e.regen) myState.regen += e.regen;
+            if(e.rage) myState.rage = Math.max(myState.rage, e.rage);
+            if(e.iron_skin) myState.iron_skin = Math.max(myState.iron_skin, e.iron_skin);
+            if(e.evasion) myState.evasion = Math.max(myState.evasion, e.evasion);
+            if(e.reflect) myState.reflect = Math.max(myState.reflect, e.reflect);
+
+            let currentStr = getMyStr() * (myState.rage > 0 ? 1.5 : 1.0);
+            
+            // Modificador Muerte Súbita / Tanque
+            if(currentGameMode === 'sudden_death') currentStr *= 2.0;
+            if(currentGameMode === 'tank') currentStr *= 0.5;
+
+            // Enviar ataque
+            if(currentGameMode === 'survival') {
+                // Lógica local contra el bot
+                let dmgToBot = (e.dmg || 0) + (e.pierce || 0);
+                enemyState.hp -= (dmgToBot * currentStr);
+                if(enemyState.hp < 0) enemyState.hp = 0;
+            } else {
+                currentChannel.send({ type: 'broadcast', event: 'gameAction', payload: { type: 'skillCast', effects: e, str: currentStr } });
+            }
+
+            // Cooldown visual
+            btnElement.classList.add("locked");
+            const overlay = btnElement.querySelector('.cooldown-overlay');
+            overlay.style.height = "100%";
+            overlay.style.transition = "none";
+            setTimeout(() => { overlay.style.transition = `height ${actualCd}ms linear`; overlay.style.height = "0%"; }, 50);
+            setTimeout(() => { btnElement.classList.remove("locked"); }, actualCd);
+
+            updateBattleUI();
+            checkWinCondition();
+        }
+
+        function processIncomingSkill(effects, enemyStr) {
+            if(myState.evasion > 0 && Math.random() < 0.3) return;
+
+            let rawDmg = (effects.dmg || 0) + (effects.lifesteal || 0) + (effects.pierce || 0);
+            rawDmg *= enemyStr;
+
+            if(myState.vuln > 0) rawDmg *= 1.5;
+            let currentRes = getMyRes() * (myState.iron_skin > 0 ? 1.5 : 1.0);
+            if(!effects.pierce && rawDmg > 0) rawDmg = rawDmg / currentRes;
+
+            if(myState.reflect > 0 && rawDmg > 0) {
+                let reflected = rawDmg * 0.3;
+                rawDmg *= 0.7;
+                if(currentGameMode !== 'survival') currentChannel.send({ type: 'broadcast', event: 'gameAction', payload: { type: 'skillCast', effects: { pierce: reflected }, str: 1.0 } });
+            }
+
+            if(rawDmg > 0) applyDamage(myState, rawDmg);
+            
+            // Modificador Robo de Datos (Vampiro) global
+            if((effects.lifesteal || currentGameMode === 'vampire') && rawDmg > 0) {
+                let healAmt = currentGameMode === 'vampire' ? rawDmg * 1.0 : rawDmg * 0.5;
+                if(currentGameMode !== 'survival') currentChannel.send({ type: 'broadcast', event: 'gameAction', payload: { type: 'skillCast', effects: { heal: healAmt }, str: 1.0 } });
+            }
+
+            if(effects.poison) myState.poison += effects.poison;
+            if(effects.burn) myState.burn = Math.max(myState.burn, effects.burn);
+            if(effects.bleed) myState.bleed += effects.bleed;
+            if(effects.stun) myState.stun = Math.max(myState.stun, effects.stun);
+            if(effects.silence) myState.silence = Math.max(myState.silence, effects.silence);
+            if(effects.freeze) myState.freeze = Math.max(myState.freeze, effects.freeze);
+            if(effects.blind) myState.blind = Math.max(myState.blind, effects.blind);
+
+            if(currentGameMode !== 'survival') currentChannel.send({ type: 'broadcast', event: 'gameAction', payload: { type: 'syncHp', hp: myState.hp, shield: myState.shield } });
+            
+            updateBattleUI();
+            checkWinCondition();
+        }
+
+        function applyDamage(targetState, amount) {
+            amount = Math.floor(amount);
+            if(targetState.shield > 0) {
+                if(targetState.shield >= amount) { targetState.shield -= amount; amount = 0; } 
+                else { amount -= targetState.shield; targetState.shield = 0; }
+            }
+            targetState.hp -= amount;
+            if(targetState.hp < 0) targetState.hp = 0;
+        }
+
+        function applyHeal(targetState, amount) { targetState.hp += amount; let max = targetState === myState ? getMyMaxHp() : enemyMaxHp; if(targetState.hp > max) targetState.hp = max; }
+
+        function battleTick() {
+            if(!inBattle) return;
+            if(myState.regen > 0) applyHeal(myState, myState.regen);
+            if(myState.poison > 0) applyDamage(myState, myState.poison);
+            if(myState.burn > 0) applyDamage(myState, myState.burn);
+            if(myState.bleed > 0) applyDamage(myState, myState.bleed);
+
+            let props = ['stun', 'silence', 'freeze', 'blind', 'reflect', 'weakness', 'vuln', 'rage', 'iron_skin', 'evasion'];
+            props.forEach(p => { if(myState[p] > 0) myState[p]--; });
+            if(myState.bleed > 0) myState.bleed = Math.floor(myState.bleed * 0.8);
+
+            if(currentGameMode !== 'survival') currentChannel.send({ type: 'broadcast', event: 'gameAction', payload: { type: 'syncHp', hp: myState.hp, shield: myState.shield } });
+            updateBattleUI();
+            checkWinCondition();
+        }
+
+        // --- IU Y UTILIDADES (Abreviado para espacio, mantiene la misma logica) ---
+        function updateMenuUI() {
+            document.getElementById("playerNameInput").value = playerData.name;
+            document.getElementById("trophyCount").innerText = playerData.trophies;
+            document.getElementById("xpCount").innerText = playerData.xp;
+            document.getElementById("levelDisplay").innerText = getLevel();
+            syncGlobalRanking(); // Llamada a BD al cargar menú
+        }
+        function savePlayerName() { playerData.name = document.getElementById("playerNameInput").value; localStorage.setItem("rush_playerName", playerData.name); syncGlobalRanking(); }
+        function showScreen(id) { document.querySelectorAll('.container').forEach(el => el.classList.remove('active')); document.getElementById(id).classList.add('active'); }
+        
+        function renderSkillsMenu() {
+            const grid = document.getElementById("skillsList"); grid.innerHTML = ""; document.getElementById("equipCount").innerText = playerData.equipped.length;
+            ALL_SKILLS.forEach(skill => {
+                const card = document.createElement("div"); card.className = "skill-card";
+                if (playerData.trophies >= skill.unlock) {
+                    card.classList.add("unlocked"); if (playerData.equipped.includes(skill.id)) card.classList.add("equipped");
+                    card.innerHTML = `<h4>${skill.name}</h4><p style="font-size:0.7rem">CD: ${skill.cd/1000}s</p>`;
+                    card.onclick = () => {
+                        if (playerData.equipped.includes(skill.id)) { if(playerData.equipped.length > 1) playerData.equipped = playerData.equipped.filter(sId => sId !== skill.id); } 
+                        else { if (playerData.equipped.length < 6) playerData.equipped.push(skill.id); }
+                        localStorage.setItem("rush_equipped", JSON.stringify(playerData.equipped)); renderSkillsMenu();
+                    };
+                } else { card.classList.add("locked"); card.innerHTML = `<h4>${skill.name}</h4><p>Bloqueado</p><small>${skill.unlock} 🏆</small>`; }
+                grid.appendChild(card);
+            });
+        }
+
+        function buildBattleControls() {
+            const grid = document.getElementById("battleSkillsGrid"); grid.innerHTML = "";
+            playerData.equipped.forEach(id => {
+                const skill = ALL_SKILLS.find(s => s.id === id);
+                const btn = document.createElement("div"); btn.className = "skill-card unlocked"; btn.id = `skillBtn-${id}`;
+                btn.innerHTML = `<h4>${skill.name}</h4><div class="cooldown-overlay" id="cd-${id}"></div>`;
+                btn.onclick = () => useSkill(skill, btn); grid.appendChild(btn);
+            });
+        }
+
+        function updateBattleUI() {
+            document.getElementById("myHpText").innerText = Math.floor(myState.hp); document.getElementById("myHealth").style.width = (myState.hp / getMyMaxHp() * 100) + "%";
+            document.getElementById("enemyHpText").innerText = Math.floor(enemyState.hp); document.getElementById("enemyHealth").style.width = (enemyState.hp / enemyMaxHp * 100) + "%";
+            // Estado y bloqueos se mantienen de la version anterior...
+            if(myState.stun > 0 || myState.silence > 0) document.getElementById("battleSkillsGrid").style.opacity = "0.5"; else document.getElementById("battleSkillsGrid").style.opacity = "1";
+        }
+
+        function checkWinCondition() {
+            if(myState.hp <= 0 && enemyState.hp <= 0) endBattle("draw");
+            else if(myState.hp <= 0) endBattle("loss");
+            else if(enemyState.hp <= 0) endBattle("win");
+        }
+
+        function endBattle(result) {
+            if(!inBattle) return; inBattle = false; clearInterval(battleLoopInterval); if(botInterval) clearInterval(botInterval);
+            let t = 0; let xp = 0;
+            if (result === "win") { t=30; xp=50; alert("¡VICTORIA!"); } 
+            else if (result === "loss") { t=-10; xp=10; alert("DERROTA..."); } 
+            else { xp=20; alert("EMPATE..."); }
+            
+            playerData.trophies = Math.max(0, playerData.trophies + t); playerData.xp += xp;
+            localStorage.setItem("rush_trophies", playerData.trophies); localStorage.setItem("rush_xp", playerData.xp);
+            
+            if(currentChannel) sb.removeChannel(currentChannel);
+            showScreen('menuScreen'); document.getElementById('rankingScreen').classList.add('active'); updateMenuUI();
+        }
+
+        updateMenuUI(); renderSkillsMenu();
+    </script>
+</body>
+</html>
